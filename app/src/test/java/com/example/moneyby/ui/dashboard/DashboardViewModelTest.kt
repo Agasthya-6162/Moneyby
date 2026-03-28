@@ -47,6 +47,7 @@ class DashboardViewModelTest {
         )
         every { repository.getAllSavingGoalsStream() } returns flowOf(emptyList())
         every { repository.getAllPendingTransactionsStream() } returns flowOf(emptyList())
+        every { repository.getBudgetsForMonthStream(any()) } returns flowOf(emptyList())
 
         viewModel = DashboardViewModel(repository, securityManager)
     }

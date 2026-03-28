@@ -2,36 +2,45 @@
 
 package com.example.moneyby.ui.stats
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material3.*
-import java.util.Calendar
-import java.util.Locale
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.moneyby.ui.AppViewModelProvider
-import androidx.compose.ui.res.stringResource
 import com.example.moneyby.R
+import com.example.moneyby.ui.AppViewModelProvider
 import com.example.moneyby.ui.theme.ChartColors
-import java.text.NumberFormat
+import com.example.moneyby.ui.theme.IncomeGreen
+import com.example.moneyby.ui.theme.ExpenseRed
 import com.example.moneyby.util.formatCurrency
+import java.util.*
 
 @Composable
 fun StatisticsScreen(
@@ -66,153 +75,143 @@ fun StatisticsScreen(
     }
 
     Scaffold(
-        modifier = Modifier.safeDrawingPadding(),
+        modifier = Modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.financial_insights)) },
+            CenterAlignedTopAppBar(
+                title = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            stringResource(R.string.financial_insights),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "$monthName $selectedYear",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
-                }
+                },
+                actions = {
+                    IconButton(onClick = { viewModel.goToPreviousMonth() }) {
+                        Icon(Icons.Default.ChevronLeft, contentDescription = "Prev")
+                    }
+                    IconButton(
+                        onClick = { viewModel.goToNextMonth() },
+                        enabled = !isCurrentMonth
+                    ) {
+                        Icon(Icons.Default.ChevronRight, contentDescription = "Next")
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = Color.Transparent
+                )
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
-        Box(
+        LazyColumn(
             modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize(),
-            contentAlignment = Alignment.TopCenter
+                .fillMaxSize()
+                .padding(innerPadding),
+            contentPadding = PaddingValues(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            LazyColumn(
-                modifier = Modifier
-                    .widthIn(max = 600.dp)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { viewModel.goToPreviousMonth() }) {
-                            Icon(Icons.Default.ChevronLeft, contentDescription = "Previous Month")
-                        }
-                        Text(
-                            text = "$monthName $selectedYear",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        IconButton(
-                            onClick = { viewModel.goToNextMonth() },
-                            enabled = !isCurrentMonth
-                        ) {
-                            Icon(
-                                Icons.Default.ChevronRight,
-                                contentDescription = "Next Month",
-                                tint = if (isCurrentMonth)
-                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                                else
-                                    MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
+            // 1. Premium Summary Header
+            item {
+                SummaryHeader(uiState.totalIncome, uiState.totalExpense)
+            }
+
+            // 2. Interactive Donut Chart for Expense Breakdown
+            item {
+                SectionTitle(stringResource(R.string.expense_breakdown))
+                if (uiState.categoryBreakdown.isNotEmpty()) {
+                    DonutChartCard(uiState.categoryBreakdown)
+                } else {
+                    EmptyStateCard(stringResource(R.string.no_expenses_tracked))
                 }
+            }
 
-                item { SummaryCard(uiState.totalIncome, uiState.totalExpense) }
-
-                item {
-                    Text(
-                        stringResource(R.string.expense_breakdown),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.secondary
+            // 3. Category Breakdown List with Percentage Bars
+            if (uiState.categoryBreakdown.isNotEmpty()) {
+                itemsIndexed(uiState.categoryBreakdown.toList().sortedByDescending { it.second }) { index, (category, amount) ->
+                    CategoryBreakdownRow(
+                        category = category,
+                        amount = amount,
+                        total = uiState.totalExpense,
+                        color = ChartColors[index % ChartColors.size],
+                        modifier = Modifier.padding(horizontal = 24.dp)
                     )
-                    Spacer(Modifier.height(12.dp))
-                    if (uiState.categoryBreakdown.isNotEmpty()) {
-                        PieChart(uiState.categoryBreakdown)
-                    } else {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            )
-                        ) {
-                            Box(
-                                Modifier.padding(48.dp).fillMaxWidth(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(stringResource(R.string.no_expenses_tracked),
-                                    style = MaterialTheme.typography.bodyMedium)
-                            }
-                        }
-                    }
                 }
+            }
 
-                item {
-                    Text(
-                        stringResource(R.string.trend_title),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    TrendChart(uiState.monthlyTrend)
-                }
+            // 4. Trend Visualization
+            item {
+                SectionTitle(stringResource(R.string.trend_title))
+                TrendChartCard(uiState.monthlyTrend)
             }
         }
     }
 }
 
 @Composable
-fun SummaryCard(income: Double, expense: Double) {
+fun SummaryHeader(income: Double, expense: Double) {
     val net = income - expense
+    val netColor = if (net >= 0) IncomeGreen else ExpenseRed
+    
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(modifier = Modifier.padding(24.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                stringResource(R.string.net_balance),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                formatCurrency(net),
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = netColor
+            )
+            
+            Spacer(Modifier.height(24.dp))
+            
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Column {
-                    Text(stringResource(R.string.monthly_income), style = MaterialTheme.typography.labelMedium)
-                    Text(
-                        formatCurrency(income),
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(stringResource(R.string.monthly_expense), style = MaterialTheme.typography.labelMedium)
-                    Text(
-                        formatCurrency(expense),
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.1f))
-            Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(stringResource(R.string.net_balance), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(
-                    formatCurrency(net),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = if (net >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                    fontWeight = FontWeight.Bold
+                // Income Mini-Card
+                SummaryIndicator(
+                    label = stringResource(R.string.income),
+                    amount = income,
+                    color = IncomeGreen,
+                    icon = Icons.Default.TrendingUp,
+                    modifier = Modifier.weight(1f)
+                )
+                
+                // Expense Mini-Card
+                SummaryIndicator(
+                    label = stringResource(R.string.expense),
+                    amount = expense,
+                    color = ExpenseRed,
+                    icon = Icons.Default.TrendingDown,
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
@@ -220,59 +219,118 @@ fun SummaryCard(income: Double, expense: Double) {
 }
 
 @Composable
-fun PieChart(data: Map<String, Double>) {
+fun SummaryIndicator(
+    label: String,
+    amount: Double,
+    color: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = color.copy(alpha = 0.1f)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = color,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text(label, style = MaterialTheme.typography.labelSmall, color = color)
+                Text(
+                    formatCurrency(amount),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = color
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SectionTitle(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(horizontal = 24.dp)
+    )
+}
+
+@Composable
+fun DonutChartCard(data: Map<String, Double>) {
     val total = data.values.sum()
+    val animatedProgress = remember { Animatable(0f) }
+    
+    LaunchedEffect(data) {
+        animatedProgress.snapTo(0f)
+        animatedProgress.animateTo(1f, animationSpec = tween(1000, easing = FastOutSlowInEasing))
+    }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(160.dp)) {
-                    Canvas(modifier = Modifier.size(140.dp)) {
-                        var startAngle = -90f
-                        data.values.forEachIndexed { index, value ->
-                            val sweepAngle = (value / total * 360f).toFloat()
-                            drawArc(
-                                color = ChartColors[index % ChartColors.size],
-                                startAngle = startAngle,
-                                sweepAngle = sweepAngle,
-                                useCenter = false,
-                                style = Stroke(width = 30.dp.toPx(), cap = StrokeCap.Round)
-                            )
-                            startAngle += sweepAngle
-                        }
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(stringResource(R.string.total), style = MaterialTheme.typography.labelSmall)
-                        Text(
-                            formatCompactNumber(total),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+        Row(
+            modifier = Modifier
+                .padding(24.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(160.dp)) {
+                Canvas(modifier = Modifier.size(140.dp)) {
+                    var startAngle = -90f
+                    data.values.forEachIndexed { index, value ->
+                        val sweepAngle = (value / total * 360f).toFloat() * animatedProgress.value
+                        drawArc(
+                            color = ChartColors[index % ChartColors.size],
+                            startAngle = startAngle,
+                            sweepAngle = sweepAngle,
+                            useCenter = false,
+                            style = Stroke(width = 24.dp.toPx(), cap = StrokeCap.Round)
                         )
+                        startAngle += sweepAngle
                     }
                 }
-                
-                Spacer(Modifier.width(28.dp))
-                
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-                    data.keys.take(6).forEachIndexed { index, category ->
-                        val amount = data[category] ?: 0.0
-                        val percentage = (amount / total * 100).toInt()
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                Modifier.size(12.dp), 
-                                color = ChartColors[index % ChartColors.size], 
-                                shape = MaterialTheme.shapes.extraSmall
-                            ) {}
-                            Spacer(Modifier.width(8.dp))
-                            Text(category, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                            Text("$percentage%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                        }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(stringResource(R.string.total), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        formatCompactNumber(total),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            
+            Spacer(Modifier.width(24.dp))
+            
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.weight(1f)) {
+                data.toList().sortedByDescending { it.second }.take(4).forEachIndexed { index, (category, amount) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(ChartColors[index % ChartColors.size]))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            category,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1
+                        )
+                        Text(
+                            "${(amount / total * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -281,14 +339,58 @@ fun PieChart(data: Map<String, Double>) {
 }
 
 @Composable
-fun TrendChart(trend: List<MonthlyTrend>) {
+fun CategoryBreakdownRow(
+    category: String,
+    amount: Double,
+    total: Double,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val percentage = (amount / total).toFloat()
+    
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(category, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(formatCurrency(amount), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(8.dp))
+        LinearProgressIndicator(
+            progress = { percentage },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(CircleShape),
+            color = color,
+            trackColor = color.copy(alpha = 0.1f),
+            strokeCap = StrokeCap.Round
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "${(percentage * 100).toInt()}% of total expenses",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.End,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun TrendChartCard(trend: List<MonthlyTrend>) {
     val maxVal = (trend.flatMap { listOf(it.income, it.expense) }.maxOrNull() ?: 1.0).toFloat()
     
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column(Modifier.padding(20.dp)) {
+        Column(Modifier.padding(24.dp)) {
             Box(Modifier.height(200.dp).fillMaxWidth()) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val width = size.width
@@ -299,24 +401,26 @@ fun TrendChart(trend: List<MonthlyTrend>) {
                         val x = spacing * (index + 1)
                         
                         // Expense Bar (Primary container style)
-                        val expHeight = (data.expense / maxVal * height * 0.7).toFloat()
-                        drawRect(
-                            color = com.example.moneyby.ui.theme.ExpenseRed.copy(alpha = 0.6f),
+                        val expHeight = (data.expense / maxVal * height * 0.8).toFloat()
+                        drawRoundRect(
+                            color = ExpenseRed.copy(alpha = 0.8f),
                             topLeft = Offset(x - 12.dp.toPx(), height - expHeight),
-                            size = Size(10.dp.toPx(), expHeight)
+                            size = Size(10.dp.toPx(), expHeight),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
                         )
 
                         // Income Bar (Primary style)
-                        val incHeight = (data.income / maxVal * height * 0.7).toFloat()
-                        drawRect(
-                            color = com.example.moneyby.ui.theme.IncomeGreen.copy(alpha = 0.6f),
+                        val incHeight = (data.income / maxVal * height * 0.8).toFloat()
+                        drawRoundRect(
+                            color = IncomeGreen.copy(alpha = 0.8f),
                             topLeft = Offset(x + 2.dp.toPx(), height - incHeight),
-                            size = Size(10.dp.toPx(), incHeight)
+                            size = Size(10.dp.toPx(), incHeight),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
                         )
                     }
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceAround
@@ -336,26 +440,53 @@ fun TrendChart(trend: List<MonthlyTrend>) {
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(Modifier.size(8.dp), color = com.example.moneyby.ui.theme.IncomeGreen, shape = MaterialTheme.shapes.extraSmall) {}
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.income), style = MaterialTheme.typography.labelSmall)
-                }
-                Spacer(Modifier.width(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(Modifier.size(8.dp), color = com.example.moneyby.ui.theme.ExpenseRed, shape = MaterialTheme.shapes.extraSmall) {}
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.expense), style = MaterialTheme.typography.labelSmall)
-                }
+                LegendItem(stringResource(R.string.income), IncomeGreen)
+                Spacer(Modifier.width(24.dp))
+                LegendItem(stringResource(R.string.expense), ExpenseRed)
             }
+        }
+    }
+}
+
+@Composable
+fun LegendItem(label: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun EmptyStateCard(message: String) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        ),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Box(
+            Modifier
+                .padding(48.dp)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
 fun formatCompactNumber(number: Double): String {
     return when {
-        number >= 1_000_000 -> String.format(Locale.getDefault(), "%.1fM", number / 1_000_000)
-        number >= 1_000 -> String.format(Locale.getDefault(), "%.1fK", number / 1_000)
-        else -> String.format(Locale.getDefault(), "%.0f", number)
+        number >= 1_000_000 -> String.format(Locale.getDefault(), "₹ %.1fM", number / 1_000_000)
+        number >= 1_000 -> String.format(Locale.getDefault(), "₹ %.1fK", number / 1_000)
+        else -> String.format(Locale.getDefault(), "₹ %.0f", number)
     }
 }

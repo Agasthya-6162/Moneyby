@@ -25,77 +25,85 @@ class DashboardViewModel(
         }
     }
 
-    val dashboardUiState: StateFlow<DashboardUiState> = combine(
-        transactionRepository.getAllTransactionsStream(),
-        transactionRepository.getAllAccountsStream(),
-        securityManager.resetDay,
-        transactionRepository.getAllSavingGoalsStream(),
-        transactionRepository.getAllPendingTransactionsStream()
-    ) { transactions, accounts, resetDay, goals, pending ->
-        val accountBalances = accounts.map { account ->
-            val fromTransactions = transactions.filter { it.accountId == account.id }
-            val toTransactions = transactions.filter { it.toAccountId == account.id }
-            
-            val income = fromTransactions.filter { it.type == "Income" }.sumOf { it.amount }
-            val expense = fromTransactions.filter { it.type == "Expense" }.sumOf { it.amount }
-            val transferOut = fromTransactions.filter { it.type == "Transfer" }.sumOf { it.amount }
-            val transferIn = toTransactions.filter { it.type == "Transfer" }.sumOf { it.amount }
-            
-            AccountBalance(account, account.initialBalance + income + transferIn - expense - transferOut)
-        }
-
-        val netWorth = accountBalances.sumOf { it.balance }
-        
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val dashboardUiState: StateFlow<DashboardUiState> = securityManager.resetDay.flatMapLatest { resetDay ->
         val dateRange = getCurrentMonthRange(resetDay)
         val startTime = dateRange.first
         val endTime = dateRange.second
-        
-        val monthlyTransactions = transactions.filter {
-            it.date in startTime..endTime
-        }
-        
-        val monthlyExpense = monthlyTransactions.filter { it.type == "Expense" }.sumOf { it.amount }
-        val monthlyIncome = monthlyTransactions.filter { it.type == "Income" }.sumOf { it.amount }
-        
         val currentMonthYear = SimpleDateFormat("MM-yyyy", Locale.getDefault()).format(Date(startTime))
         
-        // Handle budgets safely without blocking - assume empty if unavailable
-        val budgetProgress = emptyList<BudgetProgress>()
+        combine(
+            transactionRepository.getAllTransactionsStream(),
+            transactionRepository.getAllAccountsStream(),
+            transactionRepository.getBudgetsForMonthStream(currentMonthYear),
+            transactionRepository.getAllSavingGoalsStream(),
+            transactionRepository.getAllPendingTransactionsStream()
+        ) { transactions, accounts, budgets, goals, pending ->
+            val accountBalances = accounts.map { account ->
+                val fromTransactions = transactions.filter { it.accountId == account.id }
+                val toTransactions = transactions.filter { it.toAccountId == account.id }
+                
+                val income = fromTransactions.filter { it.type == "Income" }.sumOf { it.amount }
+                val expense = fromTransactions.filter { it.type == "Expense" }.sumOf { it.amount }
+                val transferOut = fromTransactions.filter { it.type == "Transfer" }.sumOf { it.amount }
+                val transferIn = toTransactions.filter { it.type == "Transfer" }.sumOf { it.amount }
+                
+                AccountBalance(account, account.initialBalance + income + transferIn - expense - transferOut)
+            }
 
-        val categoryWiseSpending = monthlyTransactions
-            .filter { it.type == "Expense" }
-            .groupBy { it.category }
-            .mapValues { (_, transactions) -> transactions.sumOf { it.amount } }
+            val netWorth = accountBalances.sumOf { it.balance }
+            
+            val monthlyTransactions = transactions.filter {
+                it.date in startTime..endTime
+            }
+            
+            val monthlyExpense = monthlyTransactions.filter { it.type == "Expense" }.sumOf { it.amount }
+            val monthlyIncome = monthlyTransactions.filter { it.type == "Income" }.sumOf { it.amount }
+            
+            val categoryWiseSpending = monthlyTransactions
+                .filter { it.type == "Expense" }
+                .groupBy { it.category }
+                .mapValues { (_, transactions) -> transactions.sumOf { it.amount } }
 
-        val topCategory = categoryWiseSpending.maxByOrNull { it.value }?.key
-        val budgetsAtRisk = 0 // Will update via separate flow if needed
+            val topCategory = categoryWiseSpending.maxByOrNull { it.value }?.key
+            
+            val budgetProgress = budgets.map { budget ->
+                val spent = monthlyTransactions
+                    .filter { it.category == budget.category && it.type == "Expense" }
+                    .sumOf { it.amount }
+                BudgetProgress(budget, spent)
+            }
 
-        val updatedGoals = goals.map { goal ->
-            val goalTransactions = transactions.filter { it.goalId == goal.id }
-            val deposits = goalTransactions.filter { it.type == "Income" }.sumOf { it.amount }
-            val withdrawals = goalTransactions.filter { it.type == "Expense" }.sumOf { it.amount }
-            val calculatedAmount = deposits - withdrawals
-            goal.copy(
-                currentAmount = calculatedAmount,
-                isCompleted = calculatedAmount >= goal.targetAmount
+            val budgetsAtRisk = budgetProgress.count { 
+                it.budget.limitAmount > 0 && it.spent >= (it.budget.limitAmount * 0.9) 
+            }
+
+            val updatedGoals = goals.map { goal ->
+                val goalTransactions = transactions.filter { it.goalId == goal.id }
+                val deposits = goalTransactions.filter { it.type == "Income" }.sumOf { it.amount }
+                val withdrawals = goalTransactions.filter { it.type == "Expense" }.sumOf { it.amount }
+                val calculatedAmount = deposits - withdrawals
+                goal.copy(
+                    currentAmount = calculatedAmount,
+                    isCompleted = calculatedAmount >= goal.targetAmount
+                )
+            }
+
+            DashboardUiState(
+                netWorth = netWorth,
+                monthlyExpense = monthlyExpense,
+                monthlyIncome = monthlyIncome,
+                accountBalances = accountBalances,
+                budgetProgress = budgetProgress,
+                categoryWiseSpending = categoryWiseSpending,
+                recentTransactions = transactions.sortedByDescending { it.date }.take(10),
+                topSpendingCategory = topCategory,
+                budgetsAtRiskCount = budgetsAtRisk,
+                savingGoals = updatedGoals.filter { !it.isCompleted }.take(3),
+                pendingTransactions = pending,
+                isLoading = false
             )
         }
-
-        DashboardUiState(
-            netWorth = netWorth,
-            monthlyExpense = monthlyExpense,
-            monthlyIncome = monthlyIncome,
-            accountBalances = accountBalances,
-            budgetProgress = budgetProgress,
-            categoryWiseSpending = categoryWiseSpending,
-            recentTransactions = transactions.sortedByDescending { it.date }.take(10),
-            topSpendingCategory = topCategory,
-            budgetsAtRiskCount = budgetsAtRisk,
-            savingGoals = updatedGoals.filter { !it.isCompleted }.take(3),
-            pendingTransactions = pending,
-            isLoading = false
-        )
-
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),

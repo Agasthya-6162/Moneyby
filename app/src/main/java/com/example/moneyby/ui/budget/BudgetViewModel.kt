@@ -19,26 +19,29 @@ class BudgetViewModel(
         getCurrentMonthYear(resetDay)
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val budgetUiState: StateFlow<BudgetUiState> = combine(
         currentMonthYear,
-        transactionRepository.getAllTransactionsStream(),
         securityManager.resetDay
-    ) { monthYear, transactions, resetDay ->
-        // Don't use .first() - assume budgets are empty if unavailable
-        val budgets = emptyList<Budget>()
-        
-        // Calculate spending for each budget category in the current period
-        val periodStart = getPeriodStart(resetDay)
-        val periodTransactions = transactions.filter { it.date >= periodStart && it.type == "Expense" }
-        
-        val budgetsWithProgress = budgets.map { budget ->
-            val spent = periodTransactions
-                .filter { it.category == budget.category }
-                .sumOf { it.amount }
-            BudgetWithProgress(budget, spent)
+    ) { month, day -> Pair(month, day) }
+    .flatMapLatest { (monthYear, resetDay) ->
+        combine(
+            transactionRepository.getBudgetsForMonthStream(monthYear),
+            transactionRepository.getAllTransactionsStream()
+        ) { budgets, transactions ->
+            // Calculate spending for each budget category in the current period
+            val periodStart = getPeriodStart(resetDay)
+            val periodTransactions = transactions.filter { it.date >= periodStart && it.type == "Expense" }
+            
+            val budgetsWithProgress = budgets.map { budget ->
+                val spent = periodTransactions
+                    .filter { it.category == budget.category }
+                    .sumOf { it.amount }
+                BudgetWithProgress(budget, spent)
+            }
+            
+            BudgetUiState(budgets = budgetsWithProgress)
         }
-        
-        BudgetUiState(budgets = budgetsWithProgress)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
