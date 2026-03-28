@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!--
+        Redesigned "Moneyby" Logo
+        A sleek, modern "M" that doubles as a growth chart.
+        Centered in the safe zone (diameter 66dp, radius 33dp from center 54,54)
+    -->
+
+    <!-- Main M Shape / Growth Path -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,70 L42,45 L54,60 L70,30 L78,38 L78,70 L70,70 L70,48 L54,75 L42,58 L30,82 Z" />
+
+    <!-- Coin / Dot for "i" or just accent -->
+    <path
+        android:fillColor="#64B5F6"
+        android:pathData="M74,25 A4,4 0 1,1 82,25 A4,4 0 1,1 74,25" />
+
+    <!-- Bottom Bar for Stability -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.3"
+        android:pathData="M25,74 L83,74 L83,78 L25,78 Z" />
+
+</vector>
